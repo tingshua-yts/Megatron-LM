@@ -53,7 +53,7 @@ def initialize_model_parallel(
     pipeline_model_parallel_size: int = 1,
     virtual_pipeline_model_parallel_size: Optional[int] = None,
     pipeline_model_parallel_split_rank: Optional[int] = None,
-) -> None:
+) :
     """
     Initialize model data parallel groups.
 

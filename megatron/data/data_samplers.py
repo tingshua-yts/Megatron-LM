@@ -73,6 +73,7 @@ class MegatronPretrainingSampler:
     def __len__(self):
         return self.total_samples
 
+    # 获取当前dp rank应该处理数据的index range；由于存在pp，因此这里返回的是micro_batch_size大小的数据
     def get_start_end_idx(self):
         start_idx = self.data_parallel_rank * self.micro_batch_size
         end_idx = start_idx + self.micro_batch_size
@@ -83,6 +84,8 @@ class MegatronPretrainingSampler:
         # Last batch will be dropped if drop_last is not set False
         for idx in range(self.consumed_samples, self.total_samples):
             batch.append(idx)
+            # 遍历还没有被消费的所有dataset，batch中存储的是global batch的所有数据，为micro_batch_size * data_parallel_size
+            # start_idx和end_idx为当前dp rank所应该获取的数据range
             if len(batch) == self.micro_batch_times_data_parallel_size:
                 start_idx, end_idx = self.get_start_end_idx()
                 yield batch[start_idx:end_idx]
@@ -160,7 +163,7 @@ class MegatronPretrainingRandomSampler:
                            * self.micro_batch_size
             bucket_offset = current_epoch_samples // self.data_parallel_size
             start_idx = self.data_parallel_rank * bucket_size
-            
+
             g = torch.Generator()
             g.manual_seed(self.epoch)
             random_idx = torch.randperm(bucket_size, generator=g).tolist()

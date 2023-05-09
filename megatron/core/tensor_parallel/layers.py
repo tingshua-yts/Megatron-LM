@@ -324,7 +324,7 @@ def linear_with_grad_accumulation_and_async_allreduce(
     gradient_accumulation_fusion: bool,
     async_grad_allreduce: bool,
     sequence_parallel_enabled: bool,
-) -> torch.Tensor:
+) :
     """Linear layer execution with asynchronous communication and
     gradient accumulation fusion in backprop.
 
@@ -455,6 +455,8 @@ class ColumnParallelLinear(torch.nn.Module):
         self.input_size = input_size
         self.output_size = output_size
         self.gather_output = gather_output
+
+        # 根据mp world size获得每个rank的output size
         # Divide the weight matrix along the last dimension.
         world_size = get_tensor_model_parallel_world_size()
         self.output_size_per_partition = divide(output_size, world_size)
@@ -474,6 +476,7 @@ class ColumnParallelLinear(torch.nn.Module):
                     self.output_size_per_partition, 0, init_method,
                     stride=stride, return_master_weight=keep_master_weight_for_test)
         else:
+            # 根据当前rank的output size来初始化weight
             self.weight = Parameter(torch.empty(
                 self.output_size_per_partition, self.input_size,
                 device=torch.cuda.current_device(), dtype=params_dtype))
@@ -486,6 +489,7 @@ class ColumnParallelLinear(torch.nn.Module):
                 self.bias = Parameter(torch.empty(
                     self.output_size_per_partition, dtype=params_dtype))
             else:
+                # 根据当前rank的output来初始化dropout
                 self.bias = Parameter(torch.empty(
                     self.output_size_per_partition,
                     device=torch.cuda.current_device(),
@@ -541,11 +545,13 @@ class ColumnParallelLinear(torch.nn.Module):
         """
         bias = self.bias if not self.skip_bias_add else None
 
+        # f函数，进行X的copy
         if self.async_tensor_model_parallel_allreduce or \
                 self.sequence_parallel_enabled:
             input_parallel = input_
         else:
             input_parallel = copy_to_tensor_model_parallel_region(input_)
+
         # Matrix multiply.
         output_parallel = linear_with_grad_accumulation_and_async_allreduce(
             input=input_parallel,
@@ -555,6 +561,8 @@ class ColumnParallelLinear(torch.nn.Module):
             async_grad_allreduce=self.async_tensor_model_parallel_allreduce,
             sequence_parallel_enabled=self.sequence_parallel_enabled,
         )
+
+        # g函数，进行output的all gather
         if self.gather_output:
             # All-gather across the partitions.
             assert not self.sequence_parallel_enabled
@@ -678,11 +686,13 @@ class RowParallelLinear(torch.nn.Module):
             - bias
         """
         # Set up backprop all-reduce.
+        # 执行f函数，将X按照列进行切分并分发到所有mp的rank桑
         if self.input_is_parallel:
             input_parallel = input_
         else:
             assert not self.sequence_parallel_enabled
             input_parallel = scatter_to_tensor_model_parallel_region(input_)
+
         # Matrix multiply.
         output_parallel = linear_with_grad_accumulation_and_async_allreduce(
             input=input_parallel,

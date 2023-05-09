@@ -85,7 +85,7 @@ def pretrain(train_valid_test_dataset_provider,
             to set already parse arguments.
     """
 
-    # Initalize and get arguments, timers, and Tensorboard writer.
+    # 1）Initalize and get arguments, timers, and Tensorboard writer.
     initialize_megatron(extra_args_provider=extra_args_provider,
                         args_defaults=args_defaults)
     # Set pytorch JIT layer fusion options and warmup JIT functions.
@@ -106,7 +106,7 @@ def pretrain(train_valid_test_dataset_provider,
     args = get_args()
     timers = get_timers()
 
-    # Model, optimizer, and learning rate.
+    # 2) Model, optimizer, and learning rate.
     timers('model-and-optimizer-setup', log_level=0).start(barrier=True)
     model, optimizer, opt_param_scheduler = setup_model_and_optimizer(
         model_provider, model_type)
@@ -114,7 +114,7 @@ def pretrain(train_valid_test_dataset_provider,
     print_datetime('after model, optimizer, and learning rate '
                    'scheduler are built')
 
-    # Data stuff.
+    # 3) Data stuff.
     timers('train/valid/test-data-iterators-setup', log_level=0).start(
         barrier=True)
     if args.virtual_pipeline_model_parallel_size is not None:
@@ -142,6 +142,7 @@ def pretrain(train_valid_test_dataset_provider,
                 'train/valid/test-data-iterators-setup'], barrier=True)
     print_rank_0('training ...')
 
+    # 4) 训练流程
     iteration = 0
     if args.do_train and args.train_iters > 0:
         iteration = train(forward_step_func,
@@ -678,6 +679,7 @@ def train(forward_step_func, model, optimizer, opt_param_scheduler,
     timers('interval-time', log_level=0).start(barrier=True)
     print_datetime('before the start of training step')
     report_memory_flag = True
+    # 每次循环是一个batch的计算，这个batch的数据会按照
     while iteration < args.train_iters:
         update_num_microbatches(args.consumed_train_samples)
         args.curr_iteration = iteration

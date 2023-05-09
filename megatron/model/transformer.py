@@ -388,17 +388,26 @@ class ParallelAttention(MegatronModule):
             if rearrange is None:
                 raise ImportError('einops is not installed, please install with pip install einops')
 
+        # 经过multi head 投影处理过后，所有attentin head一共应该具有的hidden size大小
         projection_size = args.kv_channels * args.num_attention_heads
 
         # Per attention head and per partition values.
+
         world_size = mpu.get_tensor_model_parallel_world_size()
+        # 每个attention_head应该具有的hidden size
         self.hidden_size_per_attention_head = core.utils.divide(
             projection_size, args.num_attention_heads)
+
+        # 每一个mp group rank应该具有的attention head数量
         self.num_attention_heads_per_partition = core.utils.divide(
             args.num_attention_heads, world_size)
 
         # Strided linear layer.
         if attention_type == AttnType.self_attn:
+            # 通过column parallel执行multi head的投影计算，
+            # input为hidden size的大小，output为3*projection_size，3是因为这里同时计算出来了qkv的投影值
+            # 这里的column paralel的参数w的size为[hidden_size, 3*projection_size], 实际计算时会按照3*proje# ction_size切分，每个mp rank上保留一部分
+            # 由于gather_output为false，因此产出的q、k、v也是每个mp rank上保留一部分
             self.query_key_value = tensor_parallel.ColumnParallelLinear(
                 args.hidden_size,
                 3 * projection_size,
@@ -425,6 +434,7 @@ class ParallelAttention(MegatronModule):
                 async_tensor_model_parallel_allreduce=args.async_tensor_model_parallel_allreduce,
                 **_args_to_kwargs())
 
+        # 执行attention计算的代码，每个mp rank上的q、k、v独立进行attention的计算
         self.core_attention = CoreAttention(self.layer_number,
                                             self.attn_mask_type)
         self.checkpoint_core_attention = args.recompute_granularity == 'selective'
@@ -434,7 +444,7 @@ class ParallelAttention(MegatronModule):
                 causal=True, attention_dropout=args.attention_dropout
             )
 
-        # Output.
+        # Output, 通过row parallel的线性计算，将projection_size转换为hidden_size
         self.dense = tensor_parallel.RowParallelLinear(
             projection_size,
             args.hidden_size,
@@ -495,6 +505,7 @@ class ParallelAttention(MegatronModule):
         # Query, Key, and Value
         # =====================
 
+        # 通过线性变化得到multi head的q、k、v
         if self.attention_type == AttnType.self_attn:
             # Attention heads [sq, b, h] --> [sq, b, (np * 3 * hn)]
             mixed_x_layer, _ = self.query_key_value(hidden_states)
@@ -556,6 +567,7 @@ class ParallelAttention(MegatronModule):
         # core attention computation
         # ==================================
 
+        # attention计算
         if not self.use_flash_attn:
             if self.checkpoint_core_attention:
                 context_layer = self._checkpointed_attention_forward(
@@ -576,7 +588,7 @@ class ParallelAttention(MegatronModule):
         # =================
         # Output. [sq, b, h]
         # =================
-
+        # 将multi head attention的output转换为正常的hidde size
         output, bias = self.dense(context_layer)
 
         return output, bias
